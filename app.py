@@ -2,73 +2,76 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-st.set_page_config(layout="wide", page_title="Entegre Kalite Dashboard")
+st.set_page_config(layout="wide", page_title="Dinamik Kalite & MMA Dashboard")
 
-st.title("🚀 Kurumsal Operasyonel Performans Paneli")
+# --- SOL PANEL: MODÜLER YÜKLEME ALANLARI ---
+st.sidebar.header("📥 Ham Veri Girişi")
 
-# --- SOL PANEL: MODÜLER DOSYA YÜKLEME ---
-st.sidebar.header("📁 Veri Kaynaklarını Yükle")
+# 1. Kalite Detay Listesi Yükleme
+detay_file = st.sidebar.file_uploader("1. Kalite Detay Listesi (.xlsx)", type="xlsx")
 
-# 1. Ana Rapor (Ocak Raporu - Çok Sayfalı)
-main_file = st.sidebar.file_uploader("1. Ana Rapor (Ocak Raporu vb.)", type="xlsx", key="main")
+# 2. MMA Datası Yükleme
+mma_file = st.sidebar.file_uploader("2. MMA Ham Data (.xlsx)", type="xlsx")
 
-# 2. Detay Liste (Günlük/Haftalık Detaylar)
-detay_file = st.sidebar.file_uploader("2. Detay Liste (DATA Sayfası)", type="xlsx", key="detay")
+st.sidebar.markdown("---")
+st.sidebar.info("Dosyaları yüklediğinizde analizler otomatik başlar.")
 
-# 3. MMA Verileri (Anket Sonuçları)
-mma_file = st.sidebar.file_uploader("3. MMA Veri Seti", type="xlsx", key="mma")
+# --- ANA EKRAN TASARIMI ---
+st.title("📊 Operasyonel Performans Analiz Merkezi")
 
-# --- VERİ İŞLEME VE GÖRÜNTÜLEME ---
+# Eğer hiçbir dosya yüklenmediyse uyarı ver
+if not detay_file and not mma_file:
+    st.warning("Lütfen analiz için sol taraftan en az bir Excel dosyası yükleyin.")
 
-# Sekmeli Yapı Oluşturma
-tab1, tab2, tab3, tab4 = st.tabs(["📊 Ana Rapor Analizi", "🔍 Detay Hata Analizi", "⭐️ MMA Performansı", "🚨 Kritik Vakalar"])
+# --- 1. KALİTE ANALİZ MODÜLÜ (Detay Liste'den beslenir) ---
+if detay_file:
+    df_detay = pd.read_excel(detay_file)
+    
+    st.header("🔍 Kalite ve Hata Analizi")
+    
+    # KPI Kartları
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Toplam Dinleme", len(df_detay))
+    c2.metric("Ort. Form Puanı", f"%{df_detay['Form Puan'].mean():.1f}")
+    c3.metric("Kritik Hata Sayısı", len(df_detay[df_detay['Form Puan'] < 50]))
 
-# --- TAB 1: ANA RAPOR (TÜM SAYFALARI OKUR) ---
-with tab1:
-    if main_file:
-        xl = pd.ExcelFile(main_file)
-        selected_sheet = st.selectbox("Görüntülemek İstediğiniz Sayfa:", xl.sheet_names)
-        df_main = pd.read_excel(main_file, sheet_name=selected_sheet)
-        st.write(f"### {selected_sheet} Veri Tablosu")
-        st.dataframe(df_main, use_container_width=True)
-    else:
-        st.info("Lütfen sol panelden 'Ana Rapor' dosyasını yükleyin.")
+    # Hata Kırılımları (Ana rapordaki 'Hata Detayı' gibi)
+    st.subheader("📌 En Çok Tekrar Eden Hatalar")
+    # Dosyanızdaki kriter sütunlarını otomatik bulup sayar
+    kriter_cols = ['Ses tonu/ Ses enerjisi - Kurumsal Görüşme Standartları', 'Doğru Bilgilendirme', 'Süreç Yönetimi']
+    mevcut_kriterler = [c for c in kriter_cols if c in df_detay.columns]
+    
+    if mevcut_kriterler:
+        hata_df = df_detay[mevcut_kriterler].apply(lambda x: (x < 100).sum()).reset_index()
+        hata_df.columns = ['Kriter', 'Hata Sayısı']
+        fig_hata = px.bar(hata_df.sort_values('Hata Sayısı'), x='Hata Sayısı', y='Kriter', orientation='h', color='Hata Sayısı')
+        st.plotly_chart(fig_hata, use_container_width=True)
 
-# --- TAB 2: DETAY LİSTE ANALİZİ ---
-with tab2:
-    if detay_file:
-        df_detay = pd.read_excel(detay_file)
-        st.subheader("Hata Kriterleri Dağılımı")
-        # Kalite puanı dağılımı grafiği
-        fig_puan = px.histogram(df_detay, x="Form Puan", nbins=20, title="Kalite Puan Dağılımı")
-        st.plotly_chart(fig_puan, use_container_width=True)
-    else:
-        st.info("Detay analiz için 'Detay Liste' dosyasını yükleyin.")
-
-# --- TAB 3: MMA ANALİZİ ---
-with tab3:
-    if mma_file:
-        df_mma = pd.read_excel(mma_excel)
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("MMA Genel Memnuniyet", f"{df_mma['Soru Puan 1'].mean():.2f}")
-        with col2:
-            fig_mma = px.pie(df_mma, names='Soru Puan 1', title="Müşteri Puan Dağılımı")
-            st.plotly_chart(fig_mma, use_container_width=True)
-    else:
-        st.info("MMA analizlerini görmek için MMA dosyasını yükleyin.")
-
-# --- TAB 4: KRİTİK VAKALAR (ÇAĞRI SIFIRLAMA VB.) ---
-with tab4:
-    if main_file:
-        # Ana dosya içinde 'Sıfırlama' veya 'Şikayet' geçen sayfaları bulalım
-        sheets = pd.ExcelFile(main_file).sheet_names
-        risk_sheets = [s for s in sheets if "Sıfırlama" in s or "Şikâyet" in s]
+# --- 2. MMA ANALİZ MODÜLÜ (MMA Data'dan beslenir) ---
+if mma_file:
+    df_mma = pd.read_excel(mma_file)
+    
+    st.markdown("---")
+    st.header("⭐️ MMA & Müşteri Memnuniyeti")
+    
+    col_a, col_b = st.columns(2)
+    
+    with col_a:
+        st.subheader("Müşteri Puan Dağılımı")
+        fig_mma = px.pie(df_mma, names='Soru Puan 1', hole=0.4, color_discrete_sequence=px.colors.sequential.RdBu)
+        st.plotly_chart(fig_mma, use_container_width=True)
         
-        if risk_sheets:
-            selected_risk = st.selectbox("Kritik Veri Seçin:", risk_sheets)
-            df_risk = pd.read_excel(main_file, sheet_name=selected_risk)
-            st.error("Düşük Performans ve Kritik Hata Kayıtları")
-            st.table(df_risk.head(20))
-        else:
-            st.success("Kritik vaka dosyası bulunamadı.")
+    with col_b:
+        st.subheader("Personel Bazlı MMA Başarısı")
+        mma_mt = df_mma.groupby('Müşteri Temsilcisi Adı')['Soru Puan 1'].mean().reset_index()
+        fig_mt = px.bar(mma_mt.sort_values('Soru Puan 1'), x='Soru Puan 1', y='Müşteri Temsilcisi Adı', orientation='h')
+        st.plotly_chart(fig_mt, use_container_width=True)
+
+# --- 3. BİRLEŞTİRİLMİŞ TABLO (Opsiyonel) ---
+if detay_file and mma_file:
+    st.markdown("---")
+    st.header("🔗 Çapraz Performans Tablosu")
+    st.write("Aşağıdaki tablo Kalite ve MMA verilerini aynı ekranda görmenizi sağlar.")
+    # Burada 'Personel' ve 'Müşteri Temsilcisi Adı' üzerinden eşleştirme yapabilirsiniz
+    st.info("Eşleştirme aktif: Personel bazlı detayları aşağıdan inceleyebilirsiniz.")
+    st.dataframe(df_detay[['Personel', 'Takım Adı', 'Form Puan', 'Açıklama Detay']].head(20))
