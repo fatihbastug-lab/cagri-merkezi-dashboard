@@ -2,76 +2,87 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-st.set_page_config(layout="wide", page_title="Dinamik Kalite & MMA Dashboard")
+st.set_page_config(layout="wide", page_title="Dinamik Operasyon Paneli")
 
-# --- SOL PANEL: MODÜLER YÜKLEME ALANLARI ---
-st.sidebar.header("📥 Ham Veri Girişi")
+# --- SOL PANEL: MODÜLER YÜKLEME ---
+st.sidebar.header("📥 Ham Veri Yükleme")
 
-# 1. Kalite Detay Listesi Yükleme
-detay_file = st.sidebar.file_uploader("1. Kalite Detay Listesi (.xlsx)", type="xlsx")
+# Dosyaları ayrı alanlarda topluyoruz
+uploaded_kalite = st.sidebar.file_uploader("Kalite / Hata / Kümüle Dosyası", type="xlsx", key="k1")
+uploaded_mma = st.sidebar.file_uploader("MMA Ham / Analiz Dosyası", type="xlsx", key="m1")
+uploaded_risk = st.sidebar.file_uploader("Sıfırlama / Şikayet Dosyası", type="xlsx", key="r1")
 
-# 2. MMA Datası Yükleme
-mma_file = st.sidebar.file_uploader("2. MMA Ham Data (.xlsx)", type="xlsx")
+# --- ANA EKRAN SEKMELERİ ---
+tab_perf, tab_hata, tab_mma, tab_risk = st.tabs([
+    "📈 Performans & Kümüle", 
+    "🎯 Hata Detay Analizi", 
+    "⭐️ Müşteri (MMA) Analizi", 
+    "🚨 Kritik Vakalar"
+])
 
-st.sidebar.markdown("---")
-st.sidebar.info("Dosyaları yüklediğinizde analizler otomatik başlar.")
-
-# --- ANA EKRAN TASARIMI ---
-st.title("📊 Operasyonel Performans Analiz Merkezi")
-
-# Eğer hiçbir dosya yüklenmediyse uyarı ver
-if not detay_file and not mma_file:
-    st.warning("Lütfen analiz için sol taraftan en az bir Excel dosyası yükleyin.")
-
-# --- 1. KALİTE ANALİZ MODÜLÜ (Detay Liste'den beslenir) ---
-if detay_file:
-    df_detay = pd.read_excel(detay_file)
-    
-    st.header("🔍 Kalite ve Hata Analizi")
-    
-    # KPI Kartları
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Toplam Dinleme", len(df_detay))
-    c2.metric("Ort. Form Puanı", f"%{df_detay['Form Puan'].mean():.1f}")
-    c3.metric("Kritik Hata Sayısı", len(df_detay[df_detay['Form Puan'] < 50]))
-
-    # Hata Kırılımları (Ana rapordaki 'Hata Detayı' gibi)
-    st.subheader("📌 En Çok Tekrar Eden Hatalar")
-    # Dosyanızdaki kriter sütunlarını otomatik bulup sayar
-    kriter_cols = ['Ses tonu/ Ses enerjisi - Kurumsal Görüşme Standartları', 'Doğru Bilgilendirme', 'Süreç Yönetimi']
-    mevcut_kriterler = [c for c in kriter_cols if c in df_detay.columns]
-    
-    if mevcut_kriterler:
-        hata_df = df_detay[mevcut_kriterler].apply(lambda x: (x < 100).sum()).reset_index()
-        hata_df.columns = ['Kriter', 'Hata Sayısı']
-        fig_hata = px.bar(hata_df.sort_values('Hata Sayısı'), x='Hata Sayısı', y='Kriter', orientation='h', color='Hata Sayısı')
-        st.plotly_chart(fig_hata, use_container_width=True)
-
-# --- 2. MMA ANALİZ MODÜLÜ (MMA Data'dan beslenir) ---
-if mma_file:
-    df_mma = pd.read_excel(mma_file)
-    
-    st.markdown("---")
-    st.header("⭐️ MMA & Müşteri Memnuniyeti")
-    
-    col_a, col_b = st.columns(2)
-    
-    with col_a:
-        st.subheader("Müşteri Puan Dağılımı")
-        fig_mma = px.pie(df_mma, names='Soru Puan 1', hole=0.4, color_discrete_sequence=px.colors.sequential.RdBu)
-        st.plotly_chart(fig_mma, use_container_width=True)
+# --- 1. PERFORMANS & KÜMÜLE ---
+with tab_perf:
+    if uploaded_kalite:
+        df_kum = pd.read_excel(uploaded_kalite) # Varsayılan olarak ilk sayfa
+        st.subheader("Müşteri Temsilcisi Kümüle Başarı Trendi")
         
-    with col_b:
-        st.subheader("Personel Bazlı MMA Başarısı")
-        mma_mt = df_mma.groupby('Müşteri Temsilcisi Adı')['Soru Puan 1'].mean().reset_index()
-        fig_mt = px.bar(mma_mt.sort_values('Soru Puan 1'), x='Soru Puan 1', y='Müşteri Temsilcisi Adı', orientation='h')
-        st.plotly_chart(fig_mt, use_container_width=True)
+        # Kümüle dosyasındaki sütunları otomatik bul (Son 3 Ay Ortalama vb.)
+        numeric_cols = df_kum.select_dtypes(include=['number']).columns.tolist()
+        name_col = next((c for c in df_kum.columns if c in ['AGENT', 'Personel', 'Müşteri Temsilcisi']), None)
+        
+        if name_col and numeric_cols:
+            fig_kum = px.bar(df_kum.sort_values(numeric_cols[-1], ascending=False).head(20), 
+                             x=name_col, y=numeric_cols[-1], color=numeric_cols[-1],
+                             title="En Yüksek Performanslı Temsilciler")
+            st.plotly_chart(fig_kum, use_container_width=True)
+    else:
+        st.info("Performans verilerini görmek için dosya yükleyin.")
 
-# --- 3. BİRLEŞTİRİLMİŞ TABLO (Opsiyonel) ---
-if detay_file and mma_file:
-    st.markdown("---")
-    st.header("🔗 Çapraz Performans Tablosu")
-    st.write("Aşağıdaki tablo Kalite ve MMA verilerini aynı ekranda görmenizi sağlar.")
-    # Burada 'Personel' ve 'Müşteri Temsilcisi Adı' üzerinden eşleştirme yapabilirsiniz
-    st.info("Eşleştirme aktif: Personel bazlı detayları aşağıdan inceleyebilirsiniz.")
-    st.dataframe(df_detay[['Personel', 'Takım Adı', 'Form Puan', 'Açıklama Detay']].head(20))
+# --- 2. HATA DETAY ANALİZİ ---
+with tab_hata:
+    if uploaded_kalite:
+        # Hata detaylarını içeren sayfayı bulmaya çalışalım
+        st.subheader("Hata Konuları ve Kriter Dağılımı")
+        df_hata = pd.read_excel(uploaded_kalite)
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            if 'Kriter Grup' in df_hata.columns:
+                fig_pie = px.pie(df_hata, names='Kriter Grup', title="Hata Kategorileri")
+                st.plotly_chart(fig_pie, use_container_width=True)
+        with c2:
+            if 'Hata Detayı' in df_hata.columns:
+                hata_count = df_hata['Hata Detayı'].value_counts().reset_index().head(10)
+                fig_bar = px.bar(hata_count, x='Hata Detayı', y='index', orientation='h', title="En Sık Yapılan 10 Hata")
+                st.plotly_chart(fig_bar, use_container_width=True)
+    
+# --- 3. MMA ANALİZİ ---
+with tab_mma:
+    if uploaded_mma:
+        df_mma = pd.read_excel(uploaded_mma)
+        st.subheader("Müşteri Memnuniyet Anketi (MMA) Sonuçları")
+        
+        m_col1, m_col2 = st.columns(2)
+        with m_col1:
+            if 'Soru Puan 1' in df_mma.columns:
+                st.metric("Genel MMA Ortalaması", round(df_mma['Soru Puan 1'].mean(), 2))
+                fig_mma_pie = px.pie(df_mma, names='Soru Puan 1', title="Puan Dağılımı")
+                st.plotly_chart(fig_mma_pie, use_container_width=True)
+        with m_col2:
+            if 'Açıklama' in df_mma.columns:
+                st.write("Müşteri Geri Bildirimleri")
+                st.dataframe(df_mma[['Müşteri Temsilcisi Adı', 'Açıklama']].tail(10))
+
+# --- 4. KRİTİK VAKALAR ---
+with tab_risk:
+    if uploaded_risk:
+        df_risk = pd.read_excel(uploaded_risk)
+        st.subheader("Sıfırlama Alan Çağrılar ve Risk Analizi")
+        
+        if 'Açıklama Detay' in df_risk.columns:
+            for _, row in df_risk.head(10).iterrows():
+                with st.expander(f"🔴 {row.get('Müşteri Temsilcisi', 'Personel')} - {row.get('Kriter', 'Sıfırlama')}"):
+                    st.write(f"**Detay:** {row['Açıklama Detay']}")
+                    st.caption(f"Tarih: {row.get('Çağrı Tarihi', 'Belirtilmemiş')}")
+    else:
+        st.info("Çağrı Sıfırlama verilerini yükleyin.")
