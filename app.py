@@ -2,93 +2,74 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# Sayfa Genişliği ve Başlık
-st.set_page_config(layout="wide", page_title="Kalite & MMA Entegre Analiz")
+# Sayfa Ayarları
+st.set_page_config(layout="wide", page_title="Excel Tabanlı Kalite & MMA Dashboard")
 
-st.title("📞 Çağrı Merkezi Performans Dashboard (Kalite & MMA)")
-st.markdown("---")
+st.title("📊 Çağrı Merkezi Performans Analizi (Excel)")
+st.info("Lütfen orijinal .xlsx formatındaki dosyalarınızı yükleyin.")
 
-# --- YAN PANEL: DOSYA YÜKLEME ---
-st.sidebar.header("📁 Veri Kaynakları")
-kalite_file = st.sidebar.file_uploader("1. Kalite Detay Liste CSV Yükle", type="csv")
-mma_file = st.sidebar.file_uploader("2. MMA Ham Data CSV Yükle", type="csv")
+# --- DOSYA YÜKLEME ---
+st.sidebar.header("📁 Excel Dosyalarını Yükle")
+kalite_excel = st.sidebar.file_uploader("Kalite Detay Listesi (.xlsx)", type="xlsx")
+mma_excel = st.sidebar.file_uploader("MMA Datası (.xlsx)", type="xlsx")
 
-if kalite_file and mma_file:
-    # Verileri Oku
-    df_kalite = pd.read_csv(kalite_file)
-    df_mma = pd.read_csv(mma_file)
+if kalite_excel and mma_excel:
+    # Excel Sayfalarını Oku (Sayfa adı belirtilmezse ilk sayfayı okur)
+    # Sizin dosyalarınızda veriler genellikle 'DATA' veya 'Data' sayfasında olduğu için:
+    try:
+        df_kalite = pd.read_excel(kalite_excel)
+        df_mma = pd.read_excel(mma_excel)
 
-    # Ortak anahtar üzerinden birleştirme (Sicil = Agent ID)
-    # Not: DetayListe'de 'Sicil', MMA'da 'Agent ID' sütunlarını kullanıyoruz
-    df_mma['Agent ID'] = df_mma['Agent ID'].astype(str)
-    df_kalite['Sicil'] = df_kalite['Sicil'].astype(str)
-    
-    # Personel bazlı özet tablolar hazırlama
-    kalite_ozet = df_kalite.groupby('Personel').agg({
-        'Form Puan': 'mean',
-        'Sicil': 'first',
-        'Takım Adı': 'first'
-    }).reset_index()
+        # Veri Eşleştirme Hazırlığı (Sicil ve Agent ID'yi metne çeviriyoruz)
+        df_kalite['Sicil'] = df_kalite['Sicil'].astype(str)
+        df_mma['Agent ID'] = df_mma['Agent ID'].astype(str)
 
-    mma_ozet = df_mma.groupby('Agent ID').agg({
-        'Soru Puan 1': 'mean',
-        'Soru Puan 2': 'mean',
-        'Müşteri Temsilcisi Adı': 'count'
-    }).rename(columns={'Müşteri Temsilcisi Adı': 'Anket Sayısı'}).reset_index()
+        # KPI HESAPLAMALARI
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Ortalama Kalite Puanı", f"%{df_kalite['Form Puan'].mean():.1f}")
+        with col2:
+            st.metric("MMA Memnuniyet (S1)", f"{df_mma['Soru Puan 1'].mean():.2f}")
+        with col3:
+            st.metric("Toplam Değerlendirme", len(df_kalite))
+        with col4:
+            st.metric("Toplam MMA Anketi", len(df_mma))
 
-    # İki tabloyu birleştir
-    master_df = pd.merge(kalite_ozet, mma_ozet, left_on='Sicil', right_on='Agent ID', how='inner')
+        st.divider()
 
-    # --- ÜST KPI KARTLARI ---
-    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-    kpi1.metric("Genel Kalite Ort.", f"{df_kalite['Form Puan'].mean():.1f}")
-    kpi2.metric("Genel MMA Puanı", f"{df_mma['Soru Puan 1'].mean():.1f}")
-    kpi3.metric("Toplam Dinleme", len(df_kalite))
-    kpi4.metric("Toplam Anket", len(df_mma))
+        # --- GÖRSEL ANALİZ ---
+        left, right = st.columns(2)
 
-    st.markdown("---")
+        with left:
+            st.subheader("🏢 Takım Bazlı Kalite Performansı")
+            # Takımlara göre ortalama puanlar
+            takim_puan = df_kalite.groupby('Takım Adı')['Form Puan'].mean().sort_values().reset_index()
+            fig_takim = px.bar(takim_puan, x='Form Puan', y='Takım Adı', orientation='h', 
+                               color='Form Puan', color_continuous_scale='RdYlGn')
+            st.plotly_chart(fig_takim, use_container_width=True)
 
-    # --- GRAFİKLER ---
-    col_left, col_right = st.columns(2)
+        with right:
+            st.subheader("💬 MMA Müşteri Geri Bildirimleri")
+            # Müşteri puanlarının dağılımı (1-5 arası)
+            fig_mma = px.histogram(df_mma, x="Soru Puan 1", color_discrete_sequence=['#FFA15A'], 
+                                   labels={'Soru Puan 1': 'Müşteri Puanı'})
+            st.plotly_chart(fig_mma, use_container_width=True)
 
-    with col_left:
-        st.subheader("🎯 Kalite vs MMA Korelasyonu")
-        # Kalite puanı ile müşteri memnuniyeti arasındaki ilişki
-        fig_corr = px.scatter(master_df, x="Form Puan", y="Soru Puan 1", 
-                             hover_name="Personel", size="Anket Sayısı",
-                             color="Takım Adı", title="Puan Karşılaştırması")
-        st.plotly_chart(fig_corr, use_container_width=True)
-
-    with col_right:
-        st.subheader("📉 En Çok Puan Kaybedilen Kriterler")
-        # Detay listedeki 0/100 puanlı sütunların ortalamasını alıyoruz
-        kriter_listesi = ['Ses tonu/ Ses enerjisi - Kurumsal Görüşme Standartları', 
-                          'Bekletme', 'Etkin Dinleme- Çözüm Odaklı Yaklaşım', 
-                          'Görüşme Hâkimiyeti- Sahiplenme', 'Doğru Bilgilendirme']
+        # --- KRİTİK HATALAR VE NOTLAR ---
+        st.subheader("🔍 Detaylı İnceleme ve Koçluk Notları")
         
-        # Mevcut sütunları kontrol et ve ortalama al
-        mevcut_kriterler = [c for c in kriter_listesi if c in df_kalite.columns]
-        if mevcut_kriterler:
-            kriter_puanlari = df_kalite[mevcut_kriterler].mean().sort_values().reset_index()
-            kriter_puanlari.columns = ['Kriter', 'Başarı Oranı']
-            fig_bar = px.bar(kriter_puanlari, x='Başarı Oranı', y='Kriter', orientation='h', color='Başarı Oranı')
-            st.plotly_chart(fig_bar, use_container_width=True)
+        # Filtreleme Seçeneği
+        secili_personel = st.selectbox("Personel Seçiniz:", ["Tümü"] + list(df_kalite['Personel'].unique()))
+        
+        display_df = df_kalite.copy()
+        if secili_personel != "Tümü":
+            display_df = display_df[display_df['Personel'] == secili_personel]
 
-    # --- RİSKLİ DURUMLAR VE ANALİZ ---
-    st.markdown("---")
-    st.subheader("⚠️ Kritik Analiz Tablosu")
-    
-    tab1, tab2 = st.tabs(["Düşük Performanslılar", "MMA Detay Notları"])
-    
-    with tab1:
-        # Hem kalite hem MMA puanı 70'in altında olanlar
-        riskli_mt = master_df[(master_df['Form Puan'] < 75) | (master_df['Soru Puan 1'] < 3)]
-        st.dataframe(riskli_mt[['Personel', 'Takım Adı', 'Form Puan', 'Soru Puan 1', 'Anket Sayısı']], use_container_width=True)
+        st.dataframe(display_df[['Personel', 'Takım Adı', 'Form Puan', 'Açıklama Detay', 'Dinleyen']], 
+                     use_container_width=True)
 
-    with tab2:
-        # MMA dosyasındaki ham açıklamalar
-        st.dataframe(df_mma[['Müşteri Temsilcisi Adı', 'Çağrı Konusu', 'Açıklama', 'Anket Tarihi']].tail(20), use_container_width=True)
+    except Exception as e:
+        st.error(f"Hata oluştu: {e}. Lütfen Excel dosyasındaki sütun isimlerinin doğru olduğundan emin olun.")
 
 else:
-    st.warning("Lütfen sol taraftaki panelden her iki CSV dosyasını (Kalite ve MMA) yükleyin.")
-    st.info("İpucu: 'DetayListe' ve 'MMA Tespit Aksiyon Data' dosyalarını kullanmalısınız.")
+    st.warning("Devam etmek için lütfen her iki Excel (.xlsx) dosyasını da yükleyin.")
