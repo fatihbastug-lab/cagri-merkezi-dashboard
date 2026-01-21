@@ -2,72 +2,73 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-st.set_page_config(layout="wide", page_title="Master Operasyon Dashboard")
+st.set_page_config(layout="wide", page_title="Entegre Kalite Dashboard")
 
-st.title("🚀 Kurumsal Çağrı Merkezi 360° Analiz Paneli")
-st.markdown("Ocak Raporu, MMA ve Detay Listelerin tamamını içeren entegre sistem.")
+st.title("🚀 Kurumsal Operasyonel Performans Paneli")
 
-# --- DOSYA YÜKLEME ---
-st.sidebar.header("📁 Veri Kaynakları")
-uploaded_file = st.sidebar.file_uploader("Ana Excel Dosyasını Yükle (Ocak Raporu vb.)", type="xlsx")
+# --- SOL PANEL: MODÜLER DOSYA YÜKLEME ---
+st.sidebar.header("📁 Veri Kaynaklarını Yükle")
 
-if uploaded_file:
-    # 1. Dosyadaki tüm sayfaları oku
-    xl = pd.ExcelFile(uploaded_file)
-    all_sheets = xl.sheet_names
-    
-    st.sidebar.success(f"Dosya Okundu: {len(all_sheets)} sayfa bulundu.")
-    
-    # 2. Sayfa Seçimi
-    selected_page = st.sidebar.radio("Görüntülemek İstediğiniz Analiz:", all_sheets)
-    
-    # Veriyi yükle (İlk birkaç satırı atlama gerekebilir, kod bunu otomatik dener)
-    df = pd.read_excel(uploaded_file, sheet_name=selected_page)
-    
-    # Veri Temizleme: Eğer üstte boş satırlar varsa temizle
-    if df.columns.str.contains('Unnamed').any() or df.iloc[0:2].isnull().all().any():
-        df = pd.read_excel(uploaded_file, sheet_name=selected_page, header=1) # Genelde 1. veya 2. satır başlıktır
+# 1. Ana Rapor (Ocak Raporu - Çok Sayfalı)
+main_file = st.sidebar.file_uploader("1. Ana Rapor (Ocak Raporu vb.)", type="xlsx", key="main")
 
-    # --- DİNAMİK DASHBOARD ALANLARI ---
-    
-    # A. Hata Detayları veya Outbound Sayfaları İçin (Grafik Odaklı)
-    if "Hata" in selected_page or "Detay" in selected_page:
-        st.subheader(f"⚠️ {selected_page} - Kırılım Analizi")
+# 2. Detay Liste (Günlük/Haftalık Detaylar)
+detay_file = st.sidebar.file_uploader("2. Detay Liste (DATA Sayfası)", type="xlsx", key="detay")
+
+# 3. MMA Verileri (Anket Sonuçları)
+mma_file = st.sidebar.file_uploader("3. MMA Veri Seti", type="xlsx", key="mma")
+
+# --- VERİ İŞLEME VE GÖRÜNTÜLEME ---
+
+# Sekmeli Yapı Oluşturma
+tab1, tab2, tab3, tab4 = st.tabs(["📊 Ana Rapor Analizi", "🔍 Detay Hata Analizi", "⭐️ MMA Performansı", "🚨 Kritik Vakalar"])
+
+# --- TAB 1: ANA RAPOR (TÜM SAYFALARI OKUR) ---
+with tab1:
+    if main_file:
+        xl = pd.ExcelFile(main_file)
+        selected_sheet = st.selectbox("Görüntülemek İstediğiniz Sayfa:", xl.sheet_names)
+        df_main = pd.read_excel(main_file, sheet_name=selected_sheet)
+        st.write(f"### {selected_sheet} Veri Tablosu")
+        st.dataframe(df_main, use_container_width=True)
+    else:
+        st.info("Lütfen sol panelden 'Ana Rapor' dosyasını yükleyin.")
+
+# --- TAB 2: DETAY LİSTE ANALİZİ ---
+with tab2:
+    if detay_file:
+        df_detay = pd.read_excel(detay_file)
+        st.subheader("Hata Kriterleri Dağılımı")
+        # Kalite puanı dağılımı grafiği
+        fig_puan = px.histogram(df_detay, x="Form Puan", nbins=20, title="Kalite Puan Dağılımı")
+        st.plotly_chart(fig_puan, use_container_width=True)
+    else:
+        st.info("Detay analiz için 'Detay Liste' dosyasını yükleyin.")
+
+# --- TAB 3: MMA ANALİZİ ---
+with tab3:
+    if mma_file:
+        df_mma = pd.read_excel(mma_excel)
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("MMA Genel Memnuniyet", f"{df_mma['Soru Puan 1'].mean():.2f}")
+        with col2:
+            fig_mma = px.pie(df_mma, names='Soru Puan 1', title="Müşteri Puan Dağılımı")
+            st.plotly_chart(fig_mma, use_container_width=True)
+    else:
+        st.info("MMA analizlerini görmek için MMA dosyasını yükleyin.")
+
+# --- TAB 4: KRİTİK VAKALAR (ÇAĞRI SIFIRLAMA VB.) ---
+with tab4:
+    if main_file:
+        # Ana dosya içinde 'Sıfırlama' veya 'Şikayet' geçen sayfaları bulalım
+        sheets = pd.ExcelFile(main_file).sheet_names
+        risk_sheets = [s for s in sheets if "Sıfırlama" in s or "Şikâyet" in s]
         
-        c1, c2 = st.columns(2)
-        with c1:
-            if 'Kriter Grup' in df.columns:
-                fig = px.pie(df, names='Kriter Grup', title="Hata Kategorileri", hole=0.3)
-                st.plotly_chart(fig, use_container_width=True)
-        with c2:
-            if 'Takım Adı' in df.columns:
-                fig2 = px.bar(df['Takım Adı'].value_counts().reset_index(), x='index', y='Takım Adı', title="Takım Bazlı Hata Sayıları")
-                st.plotly_chart(fig2, use_container_width=True)
-
-    # B. Kümüle Performans Sayfaları İçin (Trend Odaklı)
-    elif "Kümüle" in selected_page:
-        st.subheader(f"📈 {selected_page} - Performans Trendi")
-        # Sayısal sütunları bul (Puanlar)
-        numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
-        if 'AGENT' in df.columns or 'Personel' in df.columns:
-            name_col = 'AGENT' if 'AGENT' in df.columns else 'Personel'
-            st.write("En Yüksek Puanlı İlk 15 Temsilci")
-            fig3 = px.bar(df.sort_values(by=numeric_cols[-1], ascending=False).head(15), 
-                          x=name_col, y=numeric_cols[-1], color=numeric_cols[-1])
-            st.plotly_chart(fig3, use_container_width=True)
-
-    # C. Çağrı Sıfırlama veya Şikayet Sayfaları İçin (Kritik Uyarılar)
-    elif "Sıfırlama" in selected_page or "Şikâyet" in selected_page:
-        st.subheader(f"🚨 {selected_page} - Kritik Vakalar")
-        if 'Açıklama Detay' in df.columns:
-            for i, row in df.head(5).iterrows():
-                st.error(f"**Personel:** {row.get('Müşteri Temsilcisi', 'Bilinmiyor')} | **Kriter:** {row.get('Kriter', 'Sıfırlama')}")
-                st.caption(f"Detay: {row['Açıklama Detay']}")
-
-    # D. Genel Veri Tablosu Görüntüleme
-    st.markdown("---")
-    st.subheader("🔍 Tüm Veri Tablosu")
-    st.dataframe(df, use_container_width=True)
-
-else:
-    st.info("Lütfen tüm sayfaları analiz etmek için Excel dosyanızı yükleyin.")
+        if risk_sheets:
+            selected_risk = st.selectbox("Kritik Veri Seçin:", risk_sheets)
+            df_risk = pd.read_excel(main_file, sheet_name=selected_risk)
+            st.error("Düşük Performans ve Kritik Hata Kayıtları")
+            st.table(df_risk.head(20))
+        else:
+            st.success("Kritik vaka dosyası bulunamadı.")
