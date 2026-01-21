@@ -2,74 +2,72 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# Sayfa Ayarları
-st.set_page_config(layout="wide", page_title="Excel Tabanlı Kalite & MMA Dashboard")
+st.set_page_config(layout="wide", page_title="Master Operasyon Dashboard")
 
-st.title("📊 Çağrı Merkezi Performans Analizi (Excel)")
-st.info("Lütfen orijinal .xlsx formatındaki dosyalarınızı yükleyin.")
+st.title("🚀 Kurumsal Çağrı Merkezi 360° Analiz Paneli")
+st.markdown("Ocak Raporu, MMA ve Detay Listelerin tamamını içeren entegre sistem.")
 
 # --- DOSYA YÜKLEME ---
-st.sidebar.header("📁 Excel Dosyalarını Yükle")
-kalite_excel = st.sidebar.file_uploader("Kalite Detay Listesi (.xlsx)", type="xlsx")
-mma_excel = st.sidebar.file_uploader("MMA Datası (.xlsx)", type="xlsx")
+st.sidebar.header("📁 Veri Kaynakları")
+uploaded_file = st.sidebar.file_uploader("Ana Excel Dosyasını Yükle (Ocak Raporu vb.)", type="xlsx")
 
-if kalite_excel and mma_excel:
-    # Excel Sayfalarını Oku (Sayfa adı belirtilmezse ilk sayfayı okur)
-    # Sizin dosyalarınızda veriler genellikle 'DATA' veya 'Data' sayfasında olduğu için:
-    try:
-        df_kalite = pd.read_excel(kalite_excel)
-        df_mma = pd.read_excel(mma_excel)
+if uploaded_file:
+    # 1. Dosyadaki tüm sayfaları oku
+    xl = pd.ExcelFile(uploaded_file)
+    all_sheets = xl.sheet_names
+    
+    st.sidebar.success(f"Dosya Okundu: {len(all_sheets)} sayfa bulundu.")
+    
+    # 2. Sayfa Seçimi
+    selected_page = st.sidebar.radio("Görüntülemek İstediğiniz Analiz:", all_sheets)
+    
+    # Veriyi yükle (İlk birkaç satırı atlama gerekebilir, kod bunu otomatik dener)
+    df = pd.read_excel(uploaded_file, sheet_name=selected_page)
+    
+    # Veri Temizleme: Eğer üstte boş satırlar varsa temizle
+    if df.columns.str.contains('Unnamed').any() or df.iloc[0:2].isnull().all().any():
+        df = pd.read_excel(uploaded_file, sheet_name=selected_page, header=1) # Genelde 1. veya 2. satır başlıktır
 
-        # Veri Eşleştirme Hazırlığı (Sicil ve Agent ID'yi metne çeviriyoruz)
-        df_kalite['Sicil'] = df_kalite['Sicil'].astype(str)
-        df_mma['Agent ID'] = df_mma['Agent ID'].astype(str)
-
-        # KPI HESAPLAMALARI
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Ortalama Kalite Puanı", f"%{df_kalite['Form Puan'].mean():.1f}")
-        with col2:
-            st.metric("MMA Memnuniyet (S1)", f"{df_mma['Soru Puan 1'].mean():.2f}")
-        with col3:
-            st.metric("Toplam Değerlendirme", len(df_kalite))
-        with col4:
-            st.metric("Toplam MMA Anketi", len(df_mma))
-
-        st.divider()
-
-        # --- GÖRSEL ANALİZ ---
-        left, right = st.columns(2)
-
-        with left:
-            st.subheader("🏢 Takım Bazlı Kalite Performansı")
-            # Takımlara göre ortalama puanlar
-            takim_puan = df_kalite.groupby('Takım Adı')['Form Puan'].mean().sort_values().reset_index()
-            fig_takim = px.bar(takim_puan, x='Form Puan', y='Takım Adı', orientation='h', 
-                               color='Form Puan', color_continuous_scale='RdYlGn')
-            st.plotly_chart(fig_takim, use_container_width=True)
-
-        with right:
-            st.subheader("💬 MMA Müşteri Geri Bildirimleri")
-            # Müşteri puanlarının dağılımı (1-5 arası)
-            fig_mma = px.histogram(df_mma, x="Soru Puan 1", color_discrete_sequence=['#FFA15A'], 
-                                   labels={'Soru Puan 1': 'Müşteri Puanı'})
-            st.plotly_chart(fig_mma, use_container_width=True)
-
-        # --- KRİTİK HATALAR VE NOTLAR ---
-        st.subheader("🔍 Detaylı İnceleme ve Koçluk Notları")
+    # --- DİNAMİK DASHBOARD ALANLARI ---
+    
+    # A. Hata Detayları veya Outbound Sayfaları İçin (Grafik Odaklı)
+    if "Hata" in selected_page or "Detay" in selected_page:
+        st.subheader(f"⚠️ {selected_page} - Kırılım Analizi")
         
-        # Filtreleme Seçeneği
-        secili_personel = st.selectbox("Personel Seçiniz:", ["Tümü"] + list(df_kalite['Personel'].unique()))
-        
-        display_df = df_kalite.copy()
-        if secili_personel != "Tümü":
-            display_df = display_df[display_df['Personel'] == secili_personel]
+        c1, c2 = st.columns(2)
+        with c1:
+            if 'Kriter Grup' in df.columns:
+                fig = px.pie(df, names='Kriter Grup', title="Hata Kategorileri", hole=0.3)
+                st.plotly_chart(fig, use_container_width=True)
+        with c2:
+            if 'Takım Adı' in df.columns:
+                fig2 = px.bar(df['Takım Adı'].value_counts().reset_index(), x='index', y='Takım Adı', title="Takım Bazlı Hata Sayıları")
+                st.plotly_chart(fig2, use_container_width=True)
 
-        st.dataframe(display_df[['Personel', 'Takım Adı', 'Form Puan', 'Açıklama Detay', 'Dinleyen']], 
-                     use_container_width=True)
+    # B. Kümüle Performans Sayfaları İçin (Trend Odaklı)
+    elif "Kümüle" in selected_page:
+        st.subheader(f"📈 {selected_page} - Performans Trendi")
+        # Sayısal sütunları bul (Puanlar)
+        numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+        if 'AGENT' in df.columns or 'Personel' in df.columns:
+            name_col = 'AGENT' if 'AGENT' in df.columns else 'Personel'
+            st.write("En Yüksek Puanlı İlk 15 Temsilci")
+            fig3 = px.bar(df.sort_values(by=numeric_cols[-1], ascending=False).head(15), 
+                          x=name_col, y=numeric_cols[-1], color=numeric_cols[-1])
+            st.plotly_chart(fig3, use_container_width=True)
 
-    except Exception as e:
-        st.error(f"Hata oluştu: {e}. Lütfen Excel dosyasındaki sütun isimlerinin doğru olduğundan emin olun.")
+    # C. Çağrı Sıfırlama veya Şikayet Sayfaları İçin (Kritik Uyarılar)
+    elif "Sıfırlama" in selected_page or "Şikâyet" in selected_page:
+        st.subheader(f"🚨 {selected_page} - Kritik Vakalar")
+        if 'Açıklama Detay' in df.columns:
+            for i, row in df.head(5).iterrows():
+                st.error(f"**Personel:** {row.get('Müşteri Temsilcisi', 'Bilinmiyor')} | **Kriter:** {row.get('Kriter', 'Sıfırlama')}")
+                st.caption(f"Detay: {row['Açıklama Detay']}")
+
+    # D. Genel Veri Tablosu Görüntüleme
+    st.markdown("---")
+    st.subheader("🔍 Tüm Veri Tablosu")
+    st.dataframe(df, use_container_width=True)
 
 else:
-    st.warning("Devam etmek için lütfen her iki Excel (.xlsx) dosyasını da yükleyin.")
+    st.info("Lütfen tüm sayfaları analiz etmek için Excel dosyanızı yükleyin.")
