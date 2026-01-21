@@ -1,88 +1,85 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 
-st.set_page_config(layout="wide", page_title="Dinamik Operasyon Paneli")
+st.set_page_config(layout="wide", page_title="Operasyonel Rapor Motoru")
 
-# --- SOL PANEL: MODÜLER YÜKLEME ---
-st.sidebar.header("📥 Ham Veri Yükleme")
+st.title("🚀 Otomatik Kalite & Operasyon Raporu")
+st.markdown("Verileri yüklediğinizde sekmeler otomatik olarak dolacaktır.")
 
-# Dosyaları ayrı alanlarda topluyoruz
-uploaded_kalite = st.sidebar.file_uploader("Kalite / Hata / Kümüle Dosyası", type="xlsx", key="k1")
-uploaded_mma = st.sidebar.file_uploader("MMA Ham / Analiz Dosyası", type="xlsx", key="m1")
-uploaded_risk = st.sidebar.file_uploader("Sıfırlama / Şikayet Dosyası", type="xlsx", key="r1")
+# --- SIDEBAR: DOSYA YÜKLEME ---
+with st.sidebar:
+    st.header("📂 Veri Kaynakları")
+    f_data = st.file_uploader("1. HAM VERİ (Data)", type=["xlsx"])
+    f_mma = st.file_uploader("2. MMA (Data)", type=["xlsx"])
+    f_sikayet = st.file_uploader("3. ŞİKAYET (Data)", type=["xlsx"])
 
-# --- ANA EKRAN SEKMELERİ ---
-tab_perf, tab_hata, tab_mma, tab_risk = st.tabs([
-    "📈 Performans & Kümüle", 
-    "🎯 Hata Detay Analizi", 
-    "⭐️ Müşteri (MMA) Analizi", 
-    "🚨 Kritik Vakalar"
-])
+if f_data and f_mma and f_sikayet:
+    # Verileri Okuma
+    df_raw = pd.read_excel(f_data)
+    df_mma_raw = pd.read_excel(f_mma, sheet_name="Data")
+    df_sikayet_raw = pd.read_excel(f_sikayet, sheet_name="Data")
 
-# --- 1. PERFORMANS & KÜMÜLE ---
-with tab_perf:
-    if uploaded_kalite:
-        df_kum = pd.read_excel(uploaded_kalite) # Varsayılan olarak ilk sayfa
-        st.subheader("Müşteri Temsilcisi Kümüle Başarı Trendi")
-        
-        # Kümüle dosyasındaki sütunları otomatik bul (Son 3 Ay Ortalama vb.)
-        numeric_cols = df_kum.select_dtypes(include=['number']).columns.tolist()
-        name_col = next((c for c in df_kum.columns if c in ['AGENT', 'Personel', 'Müşteri Temsilcisi']), None)
-        
-        if name_col and numeric_cols:
-            fig_kum = px.bar(df_kum.sort_values(numeric_cols[-1], ascending=False).head(20), 
-                             x=name_col, y=numeric_cols[-1], color=numeric_cols[-1],
-                             title="En Yüksek Performanslı Temsilciler")
-            st.plotly_chart(fig_kum, use_container_width=True)
-    else:
-        st.info("Performans verilerini görmek için dosya yükleyin.")
-
-# --- 2. HATA DETAY ANALİZİ ---
-with tab_hata:
-    if uploaded_kalite:
-        # Hata detaylarını içeren sayfayı bulmaya çalışalım
-        st.subheader("Hata Konuları ve Kriter Dağılımı")
-        df_hata = pd.read_excel(uploaded_kalite)
-        
-        c1, c2 = st.columns(2)
-        with c1:
-            if 'Kriter Grup' in df_hata.columns:
-                fig_pie = px.pie(df_hata, names='Kriter Grup', title="Hata Kategorileri")
-                st.plotly_chart(fig_pie, use_container_width=True)
-        with c2:
-            if 'Hata Detayı' in df_hata.columns:
-                hata_count = df_hata['Hata Detayı'].value_counts().reset_index().head(10)
-                fig_bar = px.bar(hata_count, x='Hata Detayı', y='index', orientation='h', title="En Sık Yapılan 10 Hata")
-                st.plotly_chart(fig_bar, use_container_width=True)
+    # --- GLOBAL FİLTRELER ---
+    st.sidebar.markdown("---")
+    st.sidebar.header("🔍 Dinamik Filtreleme")
     
-# --- 3. MMA ANALİZİ ---
-with tab_mma:
-    if uploaded_mma:
-        df_mma = pd.read_excel(uploaded_mma)
-        st.subheader("Müşteri Memnuniyet Anketi (MMA) Sonuçları")
-        
-        m_col1, m_col2 = st.columns(2)
-        with m_col1:
-            if 'Soru Puan 1' in df_mma.columns:
-                st.metric("Genel MMA Ortalaması", round(df_mma['Soru Puan 1'].mean(), 2))
-                fig_mma_pie = px.pie(df_mma, names='Soru Puan 1', title="Puan Dağılımı")
-                st.plotly_chart(fig_mma_pie, use_container_width=True)
-        with m_col2:
-            if 'Açıklama' in df_mma.columns:
-                st.write("Müşteri Geri Bildirimleri")
-                st.dataframe(df_mma[['Müşteri Temsilcisi Adı', 'Açıklama']].tail(10))
+    # Tüm dosyalardaki ortak sütunları (Takım Lideri, Lokasyon) yakalayalım
+    tl_list = sorted(df_raw["Takım Adı"].unique())
+    selected_tl = st.sidebar.multiselect("Takım Lideri Seçin", tl_list)
+    
+    loc_list = sorted(df_raw["Grup Adı"].unique())
+    selected_loc = st.sidebar.multiselect("Lokasyon Seçin", loc_list)
 
-# --- 4. KRİTİK VAKALAR ---
-with tab_risk:
-    if uploaded_risk:
-        df_risk = pd.read_excel(uploaded_risk)
-        st.subheader("Sıfırlama Alan Çağrılar ve Risk Analizi")
-        
-        if 'Açıklama Detay' in df_risk.columns:
-            for _, row in df_risk.head(10).iterrows():
-                with st.expander(f"🔴 {row.get('Müşteri Temsilcisi', 'Personel')} - {row.get('Kriter', 'Sıfırlama')}"):
-                    st.write(f"**Detay:** {row['Açıklama Detay']}")
-                    st.caption(f"Tarih: {row.get('Çağrı Tarihi', 'Belirtilmemiş')}")
-    else:
-        st.info("Çağrı Sıfırlama verilerini yükleyin.")
+    # Filtreleme Fonksiyonu
+    def get_filtered(df, tl_col, loc_col):
+        temp = df.copy()
+        if selected_tl:
+            temp = temp[temp[tl_col].isin(selected_tl)]
+        if selected_loc:
+            temp = temp[temp[loc_col].isin(selected_loc)]
+        return temp
+
+    # --- SEKME YAPISI ---
+    tabs = st.tabs([
+        "📉 2023 Kümüle", 
+        "🎯 Hata Detayı - Total", 
+        "🚨 Çağrı Sıfırlama", 
+        "⭐️ MMA Ham Data", 
+        "⚖️ Şikâyet Kayıtları"
+    ])
+
+    # SEKME 1: KÜMÜLE
+    with tabs[0]:
+        st.subheader("M.T. Performans Özeti")
+        perf = get_filtered(df_raw, "Takım Adı", "Grup Adı").groupby("Personel")["Form Puan"].mean().reset_index()
+        st.dataframe(perf.sort_values("Form Puan", ascending=False), use_container_width=True)
+
+    # SEKME 2: HATA DETAYI
+    with tabs[1]:
+        st.subheader("Hata Konuları ve Açıklamalar")
+        f_hata = get_filtered(df_raw, "Takım Adı", "Grup Adı")
+        st.dataframe(f_hata[["Personel", "Kriter", "Hata Detayı", "Açıklama Detay"]], use_container_width=True)
+
+    # SEKME 3: ÇAĞRI SIFIRLAMA
+    with tabs[2]:
+        st.subheader("Kritik Hatalar (Puan Sıfırlayanlar)")
+        f_sifir = df_raw[df_raw["Form Puan"] == 0]
+        f_sifir = get_filtered(f_sifir, "Takım Adı", "Grup Adı")
+        st.error(f"Seçili filtrelerde {len(f_sifir)} adet sıfırlama tespit edildi.")
+        st.dataframe(f_sifir[["Personel", "Kriter", "Açıklama Detay", "Tarih"]], use_container_width=True)
+
+    # SEKME 4: MMA HAM DATA
+    with tabs[3]:
+        st.subheader("Müşteri Geri Bildirim Detayları")
+        f_mma = get_filtered(df_mma_raw, "Takım Lideri", "Lokasyon")
+        st.dataframe(f_mma[["Müşteri Temsilcisi Adı", "Soru Puan 1", "Açıklama"]], use_container_width=True)
+
+    # SEKME 5: ŞİKAYETLER
+    with tabs[4]:
+        st.subheader("Personel Uyarı ve Şikayet Takibi")
+        # Şikayet dosyasında sütun isimleri farklı olabilir, eşleştiriyoruz
+        f_sik = get_filtered(df_sikayet_raw, "Takım Lideri", "Lokasyon")
+        st.dataframe(f_sik[["MT İsim Soyisim", "Şikayet Ana Nedeni", "Yapılacak İş Sonucu"]], use_container_width=True)
+
+else:
+    st.info("Lütfen sol taraftaki panelden 3 Excel dosyasını (Ham Veri, MMA, Şikayet) yükleyiniz.")
